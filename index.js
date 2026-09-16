@@ -63,10 +63,12 @@ const client = new Client({
 });
 
 // =====================================================
-// TICKET CREATION LOCK
+// TICKET CREATION LOCKS
 // =====================================================
 
 const ticketCreationLocks = new Set();
+
+const ticketClosingLocks = new Set();
 
 // =====================================================
 // STAFF CACHE
@@ -76,7 +78,8 @@ let staffCache = [];
 
 let staffCacheTime = 0;
 
-const STAFF_CACHE_LIFETIME = 60 * 1000;
+const STAFF_CACHE_LIFETIME =
+  60 * 1000;
 
 // =====================================================
 // HELPERS
@@ -85,8 +88,9 @@ const STAFF_CACHE_LIFETIME = 60 * 1000;
 function isStaff(member) {
   if (!member) return false;
 
-  return STAFF_ROLE_IDS.some((roleId) =>
-    member.roles.cache.has(roleId)
+  return STAFF_ROLE_IDS.some(
+    (roleId) =>
+      member.roles.cache.has(roleId)
   );
 }
 
@@ -100,30 +104,51 @@ function cleanChannelName(name) {
 }
 
 function getTicketOwner(channel) {
-  if (!channel?.topic) return null;
+  if (!channel?.topic) {
+    return null;
+  }
 
   const match =
-    channel.topic.match(/owner=(\d+)/);
+    channel.topic.match(
+      /owner=(\d+)/
+    );
 
-  return match ? match[1] : null;
+  return match
+    ? match[1]
+    : null;
 }
 
 function getTicketType(channel) {
-  if (!channel?.topic) return 'unknown';
+  if (!channel?.topic) {
+    return 'unknown';
+  }
 
   const match =
-    channel.topic.match(/type=([^|]+)/);
+    channel.topic.match(
+      /type=([^|]+)/
+    );
 
-  return match ? match[1] : 'unknown';
+  return match
+    ? match[1]
+    : 'unknown';
 }
 
 function ticketPermissions() {
   return [
-    PermissionsBitField.Flags.ViewChannel,
-    PermissionsBitField.Flags.SendMessages,
-    PermissionsBitField.Flags.ReadMessageHistory,
-    PermissionsBitField.Flags.AttachFiles,
-    PermissionsBitField.Flags.EmbedLinks,
+    PermissionsBitField.Flags
+      .ViewChannel,
+
+    PermissionsBitField.Flags
+      .SendMessages,
+
+    PermissionsBitField.Flags
+      .ReadMessageHistory,
+
+    PermissionsBitField.Flags
+      .AttachFiles,
+
+    PermissionsBitField.Flags
+      .EmbedLinks,
   ];
 }
 
@@ -167,8 +192,11 @@ function getStaffRoleName(member) {
 // STAFF CACHE
 // =====================================================
 
-async function refreshStaffCache(guild) {
-  const now = Date.now();
+async function refreshStaffCache(
+  guild
+) {
+  const now =
+    Date.now();
 
   if (
     staffCache.length > 0 &&
@@ -189,7 +217,8 @@ async function refreshStaffCache(guild) {
         (member) => member
       );
 
-  staffCacheTime = now;
+  staffCacheTime =
+    now;
 
   return staffCache;
 }
@@ -217,7 +246,9 @@ function findExistingTicket(
 // SUPPORT PANEL
 // =====================================================
 
-async function createSupportPanel(guild) {
+async function createSupportPanel(
+  guild
+) {
   const channel =
     await guild.channels.fetch(
       SUPPORT_PANEL_CHANNEL_ID
@@ -234,8 +265,8 @@ async function createSupportPanel(guild) {
       limit: 50,
     });
 
-  const existingPanel =
-    messages.find(
+  const oldPanels =
+    messages.filter(
       (message) =>
         message.author.id ===
           client.user.id &&
@@ -243,28 +274,19 @@ async function createSupportPanel(guild) {
           '🎫 Crafted SMP Support'
     );
 
-  // ===================================================
-  // DELETE OLD PANEL
-  // ===================================================
-
-  if (existingPanel) {
+  for (
+    const oldPanel
+    of oldPanels.values()
+  ) {
     try {
-      await existingPanel.delete();
-
-      console.log(
-        '✅ Old support panel removed.'
-      );
+      await oldPanel.delete();
     } catch (error) {
       console.error(
-        'Could not remove old panel:',
+        'Old panel delete error:',
         error
       );
     }
   }
-
-  // ===================================================
-  // NEW PANEL
-  // ===================================================
 
   const embed =
     new EmbedBuilder()
@@ -334,7 +356,7 @@ async function createSupportPanel(guild) {
   });
 
   console.log(
-    '✅ New support panel created.'
+    '✅ Support panel created.'
   );
 }
 
@@ -345,6 +367,8 @@ async function createSupportPanel(guild) {
 async function showSpecificStaffMenu(
   interaction
 ) {
+  // Respond immediately.
+
   await interaction.deferReply({
     ephemeral: true,
   });
@@ -435,7 +459,7 @@ async function createTicket({
     member.id;
 
   // ===================================================
-  // STOP DOUBLE CREATION
+  // PREVENT DOUBLE CREATION
   // ===================================================
 
   if (
@@ -444,7 +468,8 @@ async function createTicket({
     )
   ) {
     return {
-      success: false,
+      success:
+        false,
 
       message:
         '⏳ Your ticket is already being created. Please wait.',
@@ -458,7 +483,7 @@ async function createTicket({
   try {
 
     // =================================================
-    // ONE OPEN TICKET PER PLAYER
+    // ONE TICKET PER PLAYER
     // =================================================
 
     const existingTicket =
@@ -469,7 +494,8 @@ async function createTicket({
 
     if (existingTicket) {
       return {
-        success: false,
+        success:
+          false,
 
         message:
           `❌ You already have an open ticket: ${existingTicket}`,
@@ -516,7 +542,7 @@ async function createTicket({
     ];
 
     // =================================================
-    // STAFF ROLES
+    // STAFF ROLE PERMISSIONS
     // =================================================
 
     for (
@@ -658,6 +684,7 @@ async function createTicket({
     const closeButton =
       new ActionRowBuilder()
         .addComponents(
+
           new ButtonBuilder()
             .setCustomId(
               'ticket_close'
@@ -840,6 +867,10 @@ async function createTranscript(
         '[No text content]'
     );
 
+    // =================================================
+    // ATTACHMENTS
+    // =================================================
+
     if (
       message.attachments.size >
       0
@@ -863,6 +894,10 @@ async function createTranscript(
         );
       }
     }
+
+    // =================================================
+    // EMBEDS
+    // =================================================
 
     if (
       message.embeds.length >
@@ -906,56 +941,102 @@ async function createTranscript(
 async function closeTicket(
   interaction
 ) {
+  // ===================================================
+  // ACKNOWLEDGE BUTTON IMMEDIATELY
+  // ===================================================
+
+  try {
+    await interaction.deferReply({
+      ephemeral:
+        true,
+    });
+
+  } catch (error) {
+
+    console.error(
+      'Could not acknowledge Close Ticket:',
+      error
+    );
+
+    return;
+  }
+
   const channel =
     interaction.channel;
 
-  const ticketOwnerId =
-    getTicketOwner(
-      channel
-    );
-
-  if (!ticketOwnerId) {
-    return interaction.reply({
-      content:
-        '❌ This is not a support ticket.',
-
-      ephemeral:
-        true,
-    });
-  }
-
-  // STAFF ONLY
+  // ===================================================
+  // STOP DOUBLE CLOSE
+  // ===================================================
 
   if (
-    !isStaff(
-      interaction.member
+    ticketClosingLocks.has(
+      channel.id
     )
   ) {
-    return interaction.reply({
+    return interaction.editReply({
       content:
-        '❌ Only staff members can close tickets.',
-
-      ephemeral:
-        true,
+        '⏳ This ticket is already being closed.',
     });
   }
 
-  await interaction.deferReply({
-    ephemeral:
-      true,
-  });
-
-  await interaction.editReply({
-    content:
-      '🔒 Saving the ticket conversation...',
-  });
+  ticketClosingLocks.add(
+    channel.id
+  );
 
   try {
+
+    // =================================================
+    // VERIFY TICKET
+    // =================================================
+
+    const ticketOwnerId =
+      getTicketOwner(
+        channel
+      );
+
+    if (!ticketOwnerId) {
+      return interaction.editReply({
+        content:
+          '❌ This is not a support ticket.',
+      });
+    }
+
+    // =================================================
+    // STAFF ONLY
+    // =================================================
+
+    if (
+      !isStaff(
+        interaction.member
+      )
+    ) {
+      return interaction.editReply({
+        content:
+          '❌ Only staff members can close tickets.',
+      });
+    }
+
+    // =================================================
+    // SHOW PROGRESS
+    // =================================================
+
+    await interaction.editReply({
+      content:
+        '🔒 Closing ticket and saving conversation...',
+    });
+
+    // =================================================
+    // CREATE TRANSCRIPT
+    // =================================================
 
     const transcript =
       await createTranscript(
         channel
       );
+
+    // =================================================
+    // GET ARCHIVE CHANNEL
+    // =================================================
 
     const archiveChannel =
       await interaction.guild.channels.fetch(
@@ -964,9 +1045,13 @@ async function closeTicket(
 
     if (!archiveChannel) {
       throw new Error(
-        'Closed ticket channel not found.'
+        'Closed ticket archive channel not found.'
       );
     }
+
+    // =================================================
+    // GET TICKET OWNER
+    // =================================================
 
     const ticketOwner =
       await interaction.guild.members
@@ -981,6 +1066,10 @@ async function closeTicket(
       getTicketType(
         channel
       );
+
+    // =================================================
+    // ARCHIVE EMBED
+    // =================================================
 
     const archiveEmbed =
       new EmbedBuilder()
@@ -1058,6 +1147,10 @@ async function closeTicket(
         )
         .setTimestamp();
 
+    // =================================================
+    // SAVE CLOSED TICKET
+    // =================================================
+
     await archiveChannel.send({
       embeds: [
         archiveEmbed,
@@ -1068,20 +1161,29 @@ async function closeTicket(
       ],
     });
 
+    // =================================================
+    // SUCCESS
+    // =================================================
+
     await interaction.editReply({
       content:
-        '✅ Ticket archived successfully.',
+        '✅ Ticket saved. Closing in 5 seconds...',
     });
 
-    await channel.send(
-      [
-        '✅ **Ticket saved successfully.**',
-        '',
-        'The conversation history has been archived.',
-        '',
-        '🔒 This ticket will be deleted in 5 seconds.',
-      ].join('\n')
-    );
+    await channel.send({
+      content:
+        [
+          '✅ **Ticket saved successfully.**',
+          '',
+          'The full conversation has been archived.',
+          '',
+          '🔒 This ticket will be deleted in 5 seconds.',
+        ].join('\n'),
+    });
+
+    // =================================================
+    // DELETE TICKET
+    // =================================================
 
     setTimeout(
       async () => {
@@ -1094,8 +1196,14 @@ async function closeTicket(
         } catch (error) {
 
           console.error(
-            'Delete error:',
+            'Ticket delete error:',
             error
+          );
+
+        } finally {
+
+          ticketClosingLocks.delete(
+            channel.id
           );
         }
       },
@@ -1105,15 +1213,29 @@ async function closeTicket(
 
   } catch (error) {
 
+    ticketClosingLocks.delete(
+      channel.id
+    );
+
     console.error(
-      'Archive error:',
+      'Close ticket error:',
       error
     );
 
-    await interaction.editReply({
-      content:
-        '❌ The ticket could not be archived. The channel will NOT be deleted.',
-    });
+    try {
+
+      await interaction.editReply({
+        content:
+          '❌ The ticket could not be archived. It will NOT be deleted.',
+      });
+
+    } catch (replyError) {
+
+      console.error(
+        'Close ticket reply error:',
+        replyError
+      );
+    }
   }
 }
 
@@ -1135,23 +1257,29 @@ client.on(
         interaction.isButton()
       ) {
 
+        // =================================================
         // SPECIFIC STAFF
+        // =================================================
 
         if (
           interaction.customId ===
           'ticket_specific_staff'
         ) {
-          return showSpecificStaffMenu(
+          return await showSpecificStaffMenu(
             interaction
           );
         }
 
+        // =================================================
         // ALL STAFF
+        // =================================================
 
         if (
           interaction.customId ===
           'ticket_all_staff'
         ) {
+          // ACKNOWLEDGE IMMEDIATELY
+
           await interaction.deferReply({
             ephemeral:
               true,
@@ -1179,11 +1307,23 @@ client.on(
                 : result.message,
           });
         }
+
+        // =================================================
+        // CLOSE TICKET
+        // =================================================
+
+        if (
+          interaction.customId ===
+          'ticket_close'
+        ) {
+          return await closeTicket(
+            interaction
+          );
+        }
       }
 
       // =================================================
       // SPECIFIC STAFF SELECT
-      // ONE OR MULTIPLE STAFF
       // =================================================
 
       if (
@@ -1191,6 +1331,8 @@ client.on(
         interaction.customId ===
           'ticket_specific_staff_select'
       ) {
+        // ACKNOWLEDGE IMMEDIATELY
+
         await interaction.deferUpdate();
 
         const selectedStaffIds =
@@ -1263,35 +1405,35 @@ client.on(
       const errorMessage =
         '❌ Something went wrong. Please try again.';
 
-      if (
-        interaction.deferred ||
-        interaction.replied
-      ) {
-        await interaction
-          .followUp({
+      try {
+
+        if (
+          interaction.deferred ||
+          interaction.replied
+        ) {
+
+          await interaction.editReply({
+            content:
+              errorMessage,
+          });
+
+        } else {
+
+          await interaction.reply({
             content:
               errorMessage,
 
             ephemeral:
               true,
-          })
-          .catch(
-            () => {}
-          );
+          });
+        }
 
-      } else {
+      } catch (replyError) {
 
-        await interaction
-          .reply({
-            content:
-              errorMessage,
-
-            ephemeral:
-              true,
-          })
-          .catch(
-            () => {}
-          );
+        console.error(
+          'Interaction reply error:',
+          replyError
+        );
       }
     }
   }
@@ -1348,7 +1490,7 @@ client.once(
           GUILD_ID
         );
 
-      // Only fetch members once at startup.
+      // Fetch members ONCE at startup.
 
       await guild.members.fetch();
 
@@ -1373,12 +1515,18 @@ client.once(
           CLOSED_TICKET_LOG_CHANNEL_ID
         );
 
+      if (!archiveChannel) {
+        throw new Error(
+          'Closed ticket archive channel not found.'
+        );
+      }
+
       console.log(
         `✅ Closed ticket archive: #${archiveChannel.name}`
       );
 
       console.log(
-        '✅ Support system ready.'
+        '✅ Crafted SMP Support system ready.'
       );
 
     } catch (error) {
