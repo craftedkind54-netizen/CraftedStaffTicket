@@ -8,38 +8,16 @@ const {
   ChannelType,
   PermissionsBitField,
   StringSelectMenuBuilder,
-  ModalBuilder,
-  TextInputBuilder,
-  TextInputStyle,
   AttachmentBuilder,
   Events,
 } = require('discord.js');
 
-const fs = require('fs');
-const path = require('path');
-
 // =====================================================
-// CRAFTED SMP PRIVATE SUPPORT BOT
-// =====================================================
-//
-// IMPORTANT PRIVACY DESIGN:
-//
-// Discord server owners can always view Discord channels.
-// Because of that, private ticket conversations are NOT
-// posted as normal messages inside ticket channels.
-//
-// Players and authorized staff communicate through:
-// - Send Message
-// - View Conversation
-//
-// Messages are stored by the bot.
-//
-// When the ticket is closed, the full conversation is
-// sent to the closed-ticket log.
-//
+// CRAFTED SMP SUPPORT BOT
+// SPOILER PRIVACY VERSION
 // =====================================================
 
-// Railway variable:
+// Railway:
 // DISCORD_TOKEN = your Discord bot token
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
@@ -83,154 +61,109 @@ const STAFF_ROLE_IDS = [
 ];
 
 // =====================================================
-// STORAGE
-// =====================================================
-
-const DATA_FOLDER =
-  path.join(__dirname, 'data');
-
-const TICKETS_FILE =
-  path.join(DATA_FOLDER, 'private-tickets.json');
-
-if (!fs.existsSync(DATA_FOLDER)) {
-  fs.mkdirSync(DATA_FOLDER, {
-    recursive: true,
-  });
-}
-
-if (!fs.existsSync(TICKETS_FILE)) {
-  fs.writeFileSync(
-    TICKETS_FILE,
-    JSON.stringify({}, null, 2),
-    'utf8'
-  );
-}
-
-function loadTickets() {
-  try {
-    return JSON.parse(
-      fs.readFileSync(
-        TICKETS_FILE,
-        'utf8'
-      )
-    );
-  } catch (error) {
-    console.error(
-      'Ticket storage read error:',
-      error
-    );
-
-    return {};
-  }
-}
-
-function saveTickets(tickets) {
-  fs.writeFileSync(
-    TICKETS_FILE,
-    JSON.stringify(
-      tickets,
-      null,
-      2
-    ),
-    'utf8'
-  );
-}
-
-function getStoredTicket(channelId) {
-  const tickets =
-    loadTickets();
-
-  return tickets[channelId] || null;
-}
-
-function saveStoredTicket(
-  channelId,
-  ticket
-) {
-  const tickets =
-    loadTickets();
-
-  tickets[channelId] =
-    ticket;
-
-  saveTickets(tickets);
-}
-
-function deleteStoredTicket(
-  channelId
-) {
-  const tickets =
-    loadTickets();
-
-  delete tickets[channelId];
-
-  saveTickets(tickets);
-}
-
-// =====================================================
 // CLIENT
 // =====================================================
 
-const client =
-  new Client({
-    intents: [
-      GatewayIntentBits.Guilds,
-      GatewayIntentBits.GuildMembers,
-      GatewayIntentBits.GuildMessages,
-    ],
-  });
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+  ],
+});
 
 // =====================================================
 // HELPERS
 // =====================================================
 
 function isStaff(member) {
-  if (!member) {
-    return false;
-  }
+  if (!member) return false;
 
   return STAFF_ROLE_IDS.some(
     (roleId) =>
-      member.roles.cache.has(
-        roleId
-      )
+      member.roles.cache.has(roleId)
   );
 }
 
 function cleanChannelName(name) {
   return name
     .toLowerCase()
-    .replace(
-      /[^a-z0-9-]/g,
-      '-'
-    )
-    .replace(
-      /-+/g,
-      '-'
-    )
-    .replace(
-      /^-|-$/g,
-      ''
-    )
-    .substring(
-      0,
-      40
+    .replace(/[^a-z0-9-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .substring(0, 40);
+}
+
+function getTicketOwner(channel) {
+  if (!channel.topic) return null;
+
+  const match =
+    channel.topic.match(/owner=(\d+)/);
+
+  return match
+    ? match[1]
+    : null;
+}
+
+function getTicketType(channel) {
+  if (!channel.topic) {
+    return 'unknown';
+  }
+
+  const match =
+    channel.topic.match(/type=([^|]+)/);
+
+  return match
+    ? match[1]
+    : 'unknown';
+}
+
+function getAllowedUsers(channel) {
+  if (!channel.topic) return [];
+
+  const match =
+    channel.topic.match(
+      /users=([^|]*)/
     );
+
+  if (!match || !match[1]) {
+    return [];
+  }
+
+  return match[1]
+    .split(',')
+    .filter(Boolean);
+}
+
+function getAllowedRoles(channel) {
+  if (!channel.topic) return [];
+
+  const match =
+    channel.topic.match(
+      /roles=([^|]*)/
+    );
+
+  if (!match || !match[1]) {
+    return [];
+  }
+
+  return match[1]
+    .split(',')
+    .filter(Boolean);
 }
 
 function ticketPermissions() {
   return [
-    PermissionsBitField.Flags
-      .ViewChannel,
-
-    PermissionsBitField.Flags
-      .ReadMessageHistory,
+    PermissionsBitField.Flags.ViewChannel,
+    PermissionsBitField.Flags.SendMessages,
+    PermissionsBitField.Flags.ReadMessageHistory,
+    PermissionsBitField.Flags.AttachFiles,
+    PermissionsBitField.Flags.EmbedLinks,
   ];
 }
 
-function getStaffRoleName(
-  member
-) {
+function getStaffRoleName(member) {
   if (
     member.roles.cache.has(
       OWNER_ROLE_ID
@@ -266,96 +199,22 @@ function getStaffRoleName(
   return 'Staff';
 }
 
-// =====================================================
-// AUTHORIZATION
-// =====================================================
-
-function canAccessTicket(
-  member,
-  ticket
-) {
-  if (!member || !ticket) {
-    return false;
-  }
-
-  // Ticket creator
-  if (
-    member.id ===
-    ticket.ownerId
-  ) {
-    return true;
-  }
-
-  // Specifically selected user
-  if (
-    ticket.allowedUsers.includes(
-      member.id
+function isTicketChannel(channel) {
+  return (
+    channel &&
+    channel.parentId ===
+      TICKET_CATEGORY_ID &&
+    channel.topic?.startsWith(
+      'CRAFTED_SUPPORT'
     )
-  ) {
-    return true;
-  }
-
-  // Selected staff role
-  for (
-    const roleId
-    of ticket.allowedRoles
-  ) {
-    if (
-      member.roles.cache.has(
-        roleId
-      )
-    ) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function canCloseTicket(
-  member,
-  ticket
-) {
-  if (
-    !isStaff(member)
-  ) {
-    return false;
-  }
-
-  return canAccessTicket(
-    member,
-    ticket
   );
-}
-
-// =====================================================
-// GET STAFF MEMBERS
-// =====================================================
-
-async function getStaffMembers(
-  guild
-) {
-  await guild.members.fetch();
-
-  return guild.members.cache
-    .filter(
-      (member) =>
-        !member.user.bot &&
-        isStaff(member)
-    )
-    .map(
-      (member) =>
-        member
-    );
 }
 
 // =====================================================
 // SUPPORT PANEL
 // =====================================================
 
-async function createSupportPanel(
-  guild
-) {
+async function createSupportPanel(guild) {
   const channel =
     await guild.channels.fetch(
       SUPPORT_PANEL_CHANNEL_ID
@@ -398,29 +257,24 @@ async function createSupportPanel(
         [
           'Need support?',
           '',
-          'Choose who should handle your ticket.',
+          'Choose who you want to handle your ticket.',
           '',
           '👤 **Specific Staff Member**',
           'Choose one staff member.',
           '',
           '🛡️ **All Staff**',
-          'Allow the entire staff team to handle the ticket.',
+          'Allow the entire staff team.',
           '',
           '👥 **Specific Staff Groups**',
-          'Choose which staff groups can handle the ticket.',
+          'Choose which staff groups.',
           '',
           '👨‍👩‍👧 **Multiple Staff Members**',
           'Choose multiple specific staff members.',
           '',
-          '🔐 **Private Conversation System**',
-          'Your support messages are handled privately through the bot.',
-          '',
-          'The complete conversation is archived when the ticket is closed.',
+          '🔐 Tickets use privacy protection.',
         ].join('\n')
       )
-      .setColor(
-        0x3498db
-      )
+      .setColor(0x3498db)
       .setFooter({
         text:
           'Crafted SMP Support System',
@@ -480,13 +334,8 @@ async function createSupportPanel(
       );
 
   await channel.send({
-    embeds: [
-      embed,
-    ],
-
-    components: [
-      buttons,
-    ],
+    embeds: [embed],
+    components: [buttons],
   });
 
   console.log(
@@ -495,7 +344,25 @@ async function createSupportPanel(
 }
 
 // =====================================================
-// STAFF SELECT MENUS
+// GET STAFF MEMBERS
+// =====================================================
+
+async function getStaffMembers(guild) {
+  await guild.members.fetch();
+
+  return guild.members.cache
+    .filter(
+      (member) =>
+        !member.user.bot &&
+        isStaff(member)
+    )
+    .map(
+      (member) => member
+    );
+}
+
+// =====================================================
+// SPECIFIC STAFF MENU
 // =====================================================
 
 async function showSpecificStaffMenu(
@@ -520,10 +387,7 @@ async function showSpecificStaffMenu(
   }
 
   const visibleStaff =
-    staffMembers.slice(
-      0,
-      25
-    );
+    staffMembers.slice(0, 25);
 
   const options =
     visibleStaff.map(
@@ -535,9 +399,7 @@ async function showSpecificStaffMenu(
           ),
 
         description:
-          getStaffRoleName(
-            member
-          ),
+          getStaffRoleName(member),
 
         value:
           member.id,
@@ -554,9 +416,7 @@ async function showSpecificStaffMenu(
       )
       .setMinValues(1)
       .setMaxValues(1)
-      .addOptions(
-        options
-      );
+      .addOptions(options);
 
   return interaction.editReply({
     content:
@@ -564,12 +424,14 @@ async function showSpecificStaffMenu(
 
     components: [
       new ActionRowBuilder()
-        .addComponents(
-          menu
-        ),
+        .addComponents(menu),
     ],
   });
 }
+
+// =====================================================
+// MULTIPLE STAFF MENU
+// =====================================================
 
 async function showMultipleStaffMenu(
   interaction
@@ -593,10 +455,7 @@ async function showMultipleStaffMenu(
   }
 
   const visibleStaff =
-    staffMembers.slice(
-      0,
-      25
-    );
+    staffMembers.slice(0, 25);
 
   const options =
     visibleStaff.map(
@@ -608,9 +467,7 @@ async function showMultipleStaffMenu(
           ),
 
         description:
-          getStaffRoleName(
-            member
-          ),
+          getStaffRoleName(member),
 
         value:
           member.id,
@@ -632,12 +489,8 @@ async function showMultipleStaffMenu(
         'Choose multiple staff members'
       )
       .setMinValues(2)
-      .setMaxValues(
-        maxChoices
-      )
-      .addOptions(
-        options
-      );
+      .setMaxValues(maxChoices)
+      .addOptions(options);
 
   return interaction.editReply({
     content:
@@ -645,9 +498,7 @@ async function showMultipleStaffMenu(
 
     components: [
       new ActionRowBuilder()
-        .addComponents(
-          menu
-        ),
+        .addComponents(menu),
     ],
   });
 }
@@ -664,42 +515,23 @@ async function createTicket({
   allowedRoles = [],
 }) {
 
-  const tickets =
-    loadTickets();
-
-  const existingTicketId =
-    Object.keys(
-      tickets
-    ).find(
-      (channelId) =>
-        tickets[channelId]
-          .ownerId ===
-        member.id
+  const existingTicket =
+    guild.channels.cache.find(
+      (channel) =>
+        channel.parentId ===
+          TICKET_CATEGORY_ID &&
+        getTicketOwner(channel) ===
+          member.id
     );
 
-  if (existingTicketId) {
-    const existingChannel =
-      guild.channels.cache.get(
-        existingTicketId
-      );
+  if (existingTicket) {
+    return {
+      success: false,
 
-    if (existingChannel) {
-      return {
-        success: false,
-
-        message:
-          `❌ You already have an open ticket: ${existingChannel}`,
-      };
-    }
-
-    deleteStoredTicket(
-      existingTicketId
-    );
+      message:
+        `❌ You already have an open ticket: ${existingTicket}`,
+    };
   }
-
-  // ===================================================
-  // CHANNEL PERMISSIONS
-  // ===================================================
 
   const overwrites = [
     {
@@ -718,11 +550,6 @@ async function createTicket({
 
       allow:
         ticketPermissions(),
-
-      deny: [
-        PermissionsBitField.Flags
-          .SendMessages,
-      ],
     },
 
     {
@@ -730,31 +557,21 @@ async function createTicket({
         client.user.id,
 
       allow: [
-        PermissionsBitField.Flags
-          .ViewChannel,
-
-        PermissionsBitField.Flags
-          .SendMessages,
-
-        PermissionsBitField.Flags
-          .ReadMessageHistory,
+        ...ticketPermissions(),
 
         PermissionsBitField.Flags
           .ManageChannels,
 
         PermissionsBitField.Flags
           .ManageMessages,
-
-        PermissionsBitField.Flags
-          .EmbedLinks,
-
-        PermissionsBitField.Flags
-          .AttachFiles,
       ],
     },
   ];
 
-  // Staff roles
+  // ===================================================
+  // STAFF ROLES
+  // ===================================================
+
   for (
     const roleId
     of STAFF_ROLE_IDS
@@ -771,13 +588,10 @@ async function createTicket({
 
         allow:
           ticketPermissions(),
-
-        deny: [
-          PermissionsBitField.Flags
-            .SendMessages,
-        ],
       });
+
     } else {
+
       overwrites.push({
         id:
           roleId,
@@ -785,15 +599,15 @@ async function createTicket({
         deny: [
           PermissionsBitField.Flags
             .ViewChannel,
-
-          PermissionsBitField.Flags
-            .SendMessages,
         ],
       });
     }
   }
 
-  // Specifically selected staff
+  // ===================================================
+  // SPECIFIC STAFF
+  // ===================================================
+
   for (
     const userId
     of allowedUsers
@@ -804,11 +618,6 @@ async function createTicket({
 
       allow:
         ticketPermissions(),
-
-      deny: [
-        PermissionsBitField.Flags
-          .SendMessages,
-      ],
     });
   }
 
@@ -816,6 +625,15 @@ async function createTicket({
     cleanChannelName(
       member.user.username
     ) || 'player';
+
+  const topic =
+    [
+      'CRAFTED_SUPPORT',
+      `owner=${member.id}`,
+      `type=${type}`,
+      `users=${allowedUsers.join(',')}`,
+      `roles=${allowedRoles.join(',')}`,
+    ].join('|');
 
   const ticketChannel =
     await guild.channels.create({
@@ -829,110 +647,74 @@ async function createTicket({
         TICKET_CATEGORY_ID,
 
       topic:
-        `CRAFTED_PRIVATE_SUPPORT|owner=${member.id}|type=${type}`,
+        topic,
 
       permissionOverwrites:
         overwrites,
     });
 
-  // ===================================================
-  // SAVE PRIVATE TICKET
-  // ===================================================
+  let privacyText =
+    'This ticket is private.';
 
-  const ticketData = {
-    channelId:
-      ticketChannel.id,
+  if (
+    type ===
+    'specific_staff'
+  ) {
+    privacyText =
+      'This ticket is for you and the selected staff member.';
+  }
 
-    ownerId:
-      member.id,
+  if (
+    type ===
+    'all_staff'
+  ) {
+    privacyText =
+      'This ticket includes all Crafted SMP staff.';
+  }
 
-    ownerUsername:
-      member.user.username,
+  if (
+    type ===
+    'staff_groups'
+  ) {
+    privacyText =
+      'This ticket includes the selected staff groups.';
+  }
 
-    type:
-      type,
-
-    allowedUsers:
-      allowedUsers,
-
-    allowedRoles:
-      allowedRoles,
-
-    createdAt:
-      Date.now(),
-
-    messages:
-      [],
-  };
-
-  saveStoredTicket(
-    ticketChannel.id,
-    ticketData
-  );
-
-  // ===================================================
-  // CHANNEL INTERFACE
-  // ===================================================
+  if (
+    type ===
+    'multiple_staff'
+  ) {
+    privacyText =
+      'This ticket includes the selected staff members.';
+  }
 
   const embed =
     new EmbedBuilder()
       .setTitle(
-        '🔐 Private Support Ticket'
+        '🎫 Support Ticket'
       )
       .setDescription(
         [
           `Welcome ${member}!`,
           '',
-          'Your support conversation uses the private bot system.',
+          privacyText,
           '',
-          '💬 **Send Message**',
-          'Send a private message into the ticket.',
+          '💬 You can type normally in this channel.',
           '',
-          '📖 **View Conversation**',
-          'Privately view the conversation.',
+          '🔐 Messages will automatically be converted into spoiler messages.',
           '',
-          '🔒 **Close Ticket**',
-          'Authorized staff can close and archive the ticket.',
-          '',
-          '⚠️ Do not type support information directly into this channel.',
+          'A staff member can close the ticket when resolved.',
         ].join('\n')
       )
-      .setColor(
-        0x2ecc71
-      )
+      .setColor(0x2ecc71)
       .setFooter({
         text:
-          'Crafted SMP Private Support',
+          `Ticket opened by ${member.user.username}`,
       });
 
-  const buttons =
+  const closeButton =
     new ActionRowBuilder()
       .addComponents(
-
-        new ButtonBuilder()
-          .setCustomId(
-            'ticket_send_message'
-          )
-          .setLabel(
-            'Send Message'
-          )
-          .setEmoji('💬')
-          .setStyle(
-            ButtonStyle.Primary
-          ),
-
-        new ButtonBuilder()
-          .setCustomId(
-            'ticket_view_conversation'
-          )
-          .setLabel(
-            'View Conversation'
-          )
-          .setEmoji('📖')
-          .setStyle(
-            ButtonStyle.Secondary
-          ),
-
         new ButtonBuilder()
           .setCustomId(
             'ticket_close'
@@ -950,370 +732,182 @@ async function createTicket({
     content:
       `${member}`,
 
-    embeds: [
-      embed,
-    ],
+    embeds:
+      [embed],
 
-    components: [
-      buttons,
-    ],
+    components:
+      [closeButton],
   });
 
   return {
-    success: true,
+    success:
+      true,
+
     channel:
       ticketChannel,
   };
 }
 
 // =====================================================
-// SEND MESSAGE MODAL
+// SPOILER MESSAGE SYSTEM
 // =====================================================
 
-async function showSendMessageModal(
-  interaction
-) {
-  const ticket =
-    getStoredTicket(
-      interaction.channel.id
-    );
+client.on(
+  Events.MessageCreate,
 
-  if (!ticket) {
-    return interaction.reply({
-      content:
-        '❌ Private ticket data could not be found.',
+  async (message) => {
 
-      ephemeral:
-        true,
-    });
-  }
+    try {
 
-  if (
-    !canAccessTicket(
-      interaction.member,
-      ticket
-    )
-  ) {
-    return interaction.reply({
-      content:
-        '❌ You are not authorized to participate in this ticket.',
+      if (
+        !message.guild ||
+        message.author.bot
+      ) {
+        return;
+      }
 
-      ephemeral:
-        true,
-    });
-  }
+      if (
+        !isTicketChannel(
+          message.channel
+        )
+      ) {
+        return;
+      }
 
-  const modal =
-    new ModalBuilder()
-      .setCustomId(
-        `ticket_message_modal:${interaction.channel.id}`
-      )
-      .setTitle(
-        'Private Support Message'
-      );
+      // Ignore slash commands
+      if (
+        message.content.startsWith(
+          '/'
+        )
+      ) {
+        return;
+      }
 
-  const messageInput =
-    new TextInputBuilder()
-      .setCustomId(
-        'support_message'
-      )
-      .setLabel(
-        'Your message'
-      )
-      .setPlaceholder(
-        'Type your support message here...'
-      )
-      .setStyle(
-        TextInputStyle.Paragraph
-      )
-      .setRequired(
-        true
-      )
-      .setMinLength(
-        1
-      )
-      .setMaxLength(
-        4000
-      );
+      const originalContent =
+        message.content;
 
-  modal.addComponents(
-    new ActionRowBuilder()
-      .addComponents(
-        messageInput
-      )
-  );
+      const attachments =
+        [...message.attachments.values()];
 
-  return interaction.showModal(
-    modal
-  );
-}
+      // If there is no text and only attachments,
+      // we still preserve attachment links.
 
-// =====================================================
-// SAVE PRIVATE MESSAGE
-// =====================================================
+      const attachmentLines =
+        attachments.map(
+          (attachment) =>
+            attachment.url
+        );
 
-async function savePrivateMessage(
-  interaction
-) {
-  const channelId =
-    interaction.customId.split(
-      ':'
-    )[1];
+      let combined =
+        originalContent;
 
-  const ticket =
-    getStoredTicket(
-      channelId
-    );
+      if (
+        attachmentLines.length > 0
+      ) {
 
-  if (!ticket) {
-    return interaction.reply({
-      content:
-        '❌ This ticket no longer exists.',
+        combined +=
+          (combined ? '\n\n' : '') +
+          attachmentLines.join('\n');
+      }
 
-      ephemeral:
-        true,
-    });
-  }
+      if (!combined) {
+        return;
+      }
 
-  if (
-    !canAccessTicket(
-      interaction.member,
-      ticket
-    )
-  ) {
-    return interaction.reply({
-      content:
-        '❌ You are not authorized to send messages in this ticket.',
+      // Prevent accidental spoiler termination.
+      // Replace existing spoiler bars.
 
-      ephemeral:
-        true,
-    });
-  }
+      combined =
+        combined.replace(
+          /\|\|/g,
+          '┃┃'
+        );
 
-  const message =
-    interaction.fields
-      .getTextInputValue(
-        'support_message'
-      )
-      .trim();
+      const authorName =
+        message.member?.displayName ||
+        message.author.username;
 
-  if (!message) {
-    return interaction.reply({
-      content:
-        '❌ Your message cannot be empty.',
+      // Delete original first.
+      await message.delete();
 
-      ephemeral:
-        true,
-    });
-  }
+      // Repost as spoiler.
+      //
+      // Discord spoilers must be clicked
+      // to reveal their contents.
 
-  ticket.messages.push({
-    authorId:
-      interaction.user.id,
+      await message.channel.send({
+        content:
+          `**${authorName}:**\n||${combined}||`,
 
-    authorUsername:
-      interaction.user.username,
-
-    authorDisplayName:
-      interaction.member.displayName,
-
-    isStaff:
-      isStaff(
-        interaction.member
-      ),
-
-    content:
-      message,
-
-    timestamp:
-      Date.now(),
-  });
-
-  saveStoredTicket(
-    channelId,
-    ticket
-  );
-
-  return interaction.reply({
-    content:
-      [
-        '✅ **Private message sent.**',
-        '',
-        'Your message was added to the support conversation.',
-        '',
-        'It was not posted as a normal message in the ticket channel.',
-      ].join('\n'),
-
-    ephemeral:
-      true,
-  });
-}
-
-// =====================================================
-// FORMAT CONVERSATION
-// =====================================================
-
-function formatConversation(
-  ticket
-) {
-  if (
-    !ticket.messages ||
-    ticket.messages.length === 0
-  ) {
-    return (
-      '📭 **No private messages have been sent yet.**'
-    );
-  }
-
-  const messages =
-    ticket.messages.slice(
-      -15
-    );
-
-  const lines = [];
-
-  for (
-    const message
-    of messages
-  ) {
-    const date =
-      new Date(
-        message.timestamp
-      );
-
-    const discordTimestamp =
-      Math.floor(
-        date.getTime() /
-        1000
-      );
-
-    const role =
-      message.isStaff
-        ? '🛡️ STAFF'
-        : '👤 PLAYER';
-
-    lines.push(
-      `${role} — **${message.authorDisplayName || message.authorUsername}**`
-    );
-
-    lines.push(
-      `<t:${discordTimestamp}:f>`
-    );
-
-    lines.push(
-      message.content
-    );
-
-    lines.push(
-      ''
-    );
-
-    lines.push(
-      '──────────────'
-    );
-
-    lines.push(
-      ''
-    );
-  }
-
-  let output =
-    lines.join('\n');
-
-  if (
-    output.length >
-    3900
-  ) {
-    output =
-      output.slice(
-        output.length -
-        3900
-      );
-
-    output =
-      '...\n' +
-      output;
-  }
-
-  return output;
-}
-
-// =====================================================
-// VIEW CONVERSATION
-// =====================================================
-
-async function viewConversation(
-  interaction
-) {
-  const ticket =
-    getStoredTicket(
-      interaction.channel.id
-    );
-
-  if (!ticket) {
-    return interaction.reply({
-      content:
-        '❌ Private ticket data could not be found.',
-
-      ephemeral:
-        true,
-    });
-  }
-
-  if (
-    !canAccessTicket(
-      interaction.member,
-      ticket
-    )
-  ) {
-    return interaction.reply({
-      content:
-        '❌ You are not authorized to view this conversation.',
-
-      ephemeral:
-        true,
-    });
-  }
-
-  const conversation =
-    formatConversation(
-      ticket
-    );
-
-  const embed =
-    new EmbedBuilder()
-      .setTitle(
-        '🔐 Private Conversation'
-      )
-      .setDescription(
-        conversation
-      )
-      .setColor(
-        0x3498db
-      )
-      .setFooter({
-        text:
-          `Showing the most recent ${Math.min(ticket.messages.length, 15)} messages`,
+        allowedMentions: {
+          parse: [],
+        },
       });
 
-  return interaction.reply({
-    embeds: [
-      embed,
-    ],
+    } catch (error) {
 
-    ephemeral:
-      true,
-  });
-}
+      console.error(
+        'Spoiler conversion error:',
+        error
+      );
+    }
+  }
+);
 
 // =====================================================
-// CREATE FINAL TRANSCRIPT
+// TRANSCRIPT
 // =====================================================
 
-function createPrivateTranscript(
-  ticket,
+async function createTranscript(
   channel
 ) {
+
+  let allMessages = [];
+
+  let before;
+
+  while (true) {
+
+    const options = {
+      limit: 100,
+    };
+
+    if (before) {
+      options.before =
+        before;
+    }
+
+    const messages =
+      await channel.messages.fetch(
+        options
+      );
+
+    if (
+      messages.size === 0
+    ) {
+      break;
+    }
+
+    allMessages.push(
+      ...messages.values()
+    );
+
+    before =
+      messages.last().id;
+
+    if (
+      messages.size < 100
+    ) {
+      break;
+    }
+  }
+
+  allMessages.sort(
+    (a, b) =>
+      a.createdTimestamp -
+      b.createdTimestamp
+  );
+
   const lines = [];
 
   lines.push(
@@ -1321,7 +915,7 @@ function createPrivateTranscript(
   );
 
   lines.push(
-    'CRAFTED SMP PRIVATE SUPPORT TICKET'
+    'CRAFTED SMP SUPPORT TICKET'
   );
 
   lines.push(
@@ -1343,19 +937,9 @@ function createPrivateTranscript(
   );
 
   lines.push(
-    `Created By: ${ticket.ownerUsername}`
-  );
-
-  lines.push(
-    `Creator ID: ${ticket.ownerId}`
-  );
-
-  lines.push(
-    `Ticket Type: ${ticket.type}`
-  );
-
-  lines.push(
-    `Created: ${new Date(ticket.createdAt).toLocaleString()}`
+    `Created: ${new Date(
+      channel.createdTimestamp
+    ).toLocaleString()}`
   );
 
   lines.push('');
@@ -1366,21 +950,14 @@ function createPrivateTranscript(
 
   lines.push('');
 
-  if (
-    ticket.messages.length === 0
-  ) {
-    lines.push(
-      '[No private messages were sent.]'
-    );
-  }
-
   for (
     const message
-    of ticket.messages
+    of allMessages
   ) {
+
     const date =
       new Date(
-        message.timestamp
+        message.createdTimestamp
       ).toLocaleString();
 
     lines.push(
@@ -1388,17 +965,24 @@ function createPrivateTranscript(
     );
 
     lines.push(
-      `${message.isStaff ? '[STAFF]' : '[PLAYER]'} ${message.authorDisplayName || message.authorUsername}`
-    );
-
-    lines.push(
-      `User ID: ${message.authorId}`
+      `${message.author.tag} (${message.author.id})`
     );
 
     lines.push('');
 
+    // Remove spoiler formatting
+    // from final transcript.
+
+    const cleanContent =
+      (message.content || '')
+        .replace(
+          /\|\|/g,
+          ''
+        );
+
     lines.push(
-      message.content
+      cleanContent ||
+        '[No text content]'
     );
 
     lines.push('');
@@ -1420,7 +1004,7 @@ function createPrivateTranscript(
     buffer,
     {
       name:
-        `${channel.name}-private-conversation.txt`,
+        `${channel.name}-conversation-history.txt`,
     }
   );
 }
@@ -1432,18 +1016,19 @@ function createPrivateTranscript(
 async function closeTicket(
   interaction
 ) {
+
   const channel =
     interaction.channel;
 
-  const ticket =
-    getStoredTicket(
-      channel.id
+  const ticketOwnerId =
+    getTicketOwner(
+      channel
     );
 
-  if (!ticket) {
+  if (!ticketOwnerId) {
     return interaction.reply({
       content:
-        '❌ Private ticket data could not be found.',
+        '❌ This is not a support ticket.',
 
       ephemeral:
         true,
@@ -1451,14 +1036,52 @@ async function closeTicket(
   }
 
   if (
-    !canCloseTicket(
-      interaction.member,
-      ticket
+    !isStaff(
+      interaction.member
     )
   ) {
     return interaction.reply({
       content:
-        '❌ Only authorized staff members can close this ticket.',
+        '❌ Only staff members can close tickets.',
+
+      ephemeral:
+        true,
+    });
+  }
+
+  // Only staff included in the ticket
+  // should be able to close it.
+
+  const allowedUsers =
+    getAllowedUsers(
+      channel
+    );
+
+  const allowedRoles =
+    getAllowedRoles(
+      channel
+    );
+
+  const specificallyAllowed =
+    allowedUsers.includes(
+      interaction.user.id
+    );
+
+  const roleAllowed =
+    allowedRoles.some(
+      (roleId) =>
+        interaction.member.roles.cache.has(
+          roleId
+        )
+    );
+
+  if (
+    !specificallyAllowed &&
+    !roleAllowed
+  ) {
+    return interaction.reply({
+      content:
+        '❌ You were not included in this ticket.',
 
       ephemeral:
         true,
@@ -1467,13 +1090,18 @@ async function closeTicket(
 
   await interaction.reply({
     content:
-      '🔒 Archiving the private conversation...',
+      '🔒 Saving the ticket conversation...',
 
     ephemeral:
       true,
   });
 
   try {
+
+    const transcript =
+      await createTranscript(
+        channel
+      );
 
     const archiveChannel =
       await interaction.guild.channels.fetch(
@@ -1482,37 +1110,36 @@ async function closeTicket(
 
     if (!archiveChannel) {
       throw new Error(
-        'Closed ticket archive channel not found.'
+        'Closed ticket channel not found.'
       );
     }
-
-    const transcript =
-      createPrivateTranscript(
-        ticket,
-        channel
-      );
 
     const ticketOwner =
       await interaction.guild.members
         .fetch(
-          ticket.ownerId
+          ticketOwnerId
         )
         .catch(
           () => null
         );
 
+    const ticketType =
+      getTicketType(
+        channel
+      );
+
     const archiveEmbed =
       new EmbedBuilder()
         .setTitle(
-          '🔒 Closed Private Support Ticket'
+          '🔒 Closed Support Ticket'
         )
         .setDescription(
           [
-            'This support ticket has been closed.',
+            'This ticket has been closed.',
             '',
-            '📎 The complete private conversation is attached.',
+            '📎 The full conversation history is attached.',
             '',
-            'The conversation was stored privately until the ticket was closed.',
+            'Spoiler formatting has been removed from the archived transcript.',
           ].join('\n')
         )
         .addFields(
@@ -1535,7 +1162,7 @@ async function closeTicket(
             value:
               ticketOwner
                 ? `${ticketOwner.user.tag}\n<@${ticketOwner.id}>`
-                : `<@${ticket.ownerId}>`,
+                : `<@${ticketOwnerId}>`,
 
             inline:
               true,
@@ -1557,18 +1184,7 @@ async function closeTicket(
               '📂 Ticket Type',
 
             value:
-              ticket.type,
-
-            inline:
-              true,
-          },
-
-          {
-            name:
-              '💬 Messages',
-
-            value:
-              `${ticket.messages.length}`,
+              ticketType,
 
             inline:
               true,
@@ -1590,9 +1206,6 @@ async function closeTicket(
         )
         .setTimestamp();
 
-    // IMPORTANT:
-    // Archive BEFORE deleting private data.
-
     await archiveChannel.send({
       embeds: [
         archiveEmbed,
@@ -1603,19 +1216,12 @@ async function closeTicket(
       ],
     });
 
-    // Only delete stored conversation after
-    // archive succeeds.
-
-    deleteStoredTicket(
-      channel.id
-    );
-
     await channel.send({
       content:
         [
-          '✅ **Ticket archived successfully.**',
+          '✅ **Ticket saved successfully.**',
           '',
-          'The complete conversation has been saved.',
+          'The conversation has been archived.',
           '',
           '🔒 This ticket will be deleted in 5 seconds.',
         ].join('\n'),
@@ -1623,16 +1229,21 @@ async function closeTicket(
 
     setTimeout(
       async () => {
+
         try {
+
           await channel.delete(
             `Closed by ${interaction.user.tag}`
           );
+
         } catch (error) {
+
           console.error(
-            'Ticket delete error:',
+            'Delete error:',
             error
           );
         }
+
       },
       5000
     );
@@ -1640,20 +1251,16 @@ async function closeTicket(
   } catch (error) {
 
     console.error(
-      'Ticket archive error:',
+      'Archive error:',
       error
     );
 
     await interaction.followUp({
       content:
         [
-          '❌ **The ticket could not be archived.**',
+          '❌ The ticket could not be archived.',
           '',
-          'The ticket was NOT deleted.',
-          '',
-          'The private conversation was NOT deleted.',
-          '',
-          'This prevents the conversation from being lost.',
+          'The ticket will NOT be deleted.',
         ].join('\n'),
 
       ephemeral:
@@ -1681,10 +1288,6 @@ client.on(
         interaction.isButton()
       ) {
 
-        // -----------------------------------------------
-        // SPECIFIC STAFF
-        // -----------------------------------------------
-
         if (
           interaction.customId ===
           'ticket_specific_staff'
@@ -1693,10 +1296,6 @@ client.on(
             interaction
           );
         }
-
-        // -----------------------------------------------
-        // ALL STAFF
-        // -----------------------------------------------
 
         if (
           interaction.customId ===
@@ -1726,14 +1325,10 @@ client.on(
           return interaction.editReply({
             content:
               result.success
-                ? `✅ Private ticket created: ${result.channel}`
+                ? `✅ Ticket created: ${result.channel}`
                 : result.message,
           });
         }
-
-        // -----------------------------------------------
-        // STAFF GROUPS
-        // -----------------------------------------------
 
         if (
           interaction.customId ===
@@ -1799,7 +1394,7 @@ client.on(
 
           return interaction.reply({
             content:
-              '👥 Choose which staff groups should handle the ticket.',
+              '👥 Choose which staff groups can access the ticket.',
 
             components: [
               new ActionRowBuilder()
@@ -1813,10 +1408,6 @@ client.on(
           });
         }
 
-        // -----------------------------------------------
-        // MULTIPLE STAFF
-        // -----------------------------------------------
-
         if (
           interaction.customId ===
           'ticket_multiple_staff'
@@ -1825,36 +1416,6 @@ client.on(
             interaction
           );
         }
-
-        // -----------------------------------------------
-        // SEND MESSAGE
-        // -----------------------------------------------
-
-        if (
-          interaction.customId ===
-          'ticket_send_message'
-        ) {
-          return showSendMessageModal(
-            interaction
-          );
-        }
-
-        // -----------------------------------------------
-        // VIEW CONVERSATION
-        // -----------------------------------------------
-
-        if (
-          interaction.customId ===
-          'ticket_view_conversation'
-        ) {
-          return viewConversation(
-            interaction
-          );
-        }
-
-        // -----------------------------------------------
-        // CLOSE TICKET
-        // -----------------------------------------------
 
         if (
           interaction.customId ===
@@ -1892,10 +1453,10 @@ client.on(
 
         if (
           !selectedStaff ||
-          selectedStaff.user.bot ||
           !isStaff(
             selectedStaff
-          )
+          ) ||
+          selectedStaff.user.bot
         ) {
           return interaction.editReply({
             content:
@@ -2052,21 +1613,6 @@ client.on(
         });
       }
 
-      // =================================================
-      // PRIVATE MESSAGE MODAL
-      // =================================================
-
-      if (
-        interaction.isModalSubmit() &&
-        interaction.customId.startsWith(
-          'ticket_message_modal:'
-        )
-      ) {
-        return savePrivateMessage(
-          interaction
-        );
-      }
-
     } catch (error) {
 
       console.error(
@@ -2081,6 +1627,7 @@ client.on(
         interaction.deferred ||
         interaction.replied
       ) {
+
         await interaction
           .followUp({
             content:
@@ -2118,9 +1665,7 @@ client.on(
 client.once(
   Events.ClientReady,
 
-  async (
-    readyClient
-  ) => {
+  async (readyClient) => {
 
     console.log(
       `✅ Logged in as ${readyClient.user.tag}`
@@ -2161,10 +1706,6 @@ client.once(
 
       console.log(
         `✅ Closed ticket archive: #${archiveChannel.name}`
-      );
-
-      console.log(
-        '🔐 Private ticket storage ready.'
       );
 
     } catch (error) {
