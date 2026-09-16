@@ -14,7 +14,6 @@ const {
 
 // =====================================================
 // CRAFTED SMP SUPPORT BOT
-// STABLE MULTI-TICKET VERSION
 // =====================================================
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
@@ -67,9 +66,6 @@ const client = new Client({
 // TICKET CREATION LOCK
 // =====================================================
 
-// Prevents somebody double-clicking buttons
-// and accidentally creating multiple tickets.
-
 const ticketCreationLocks = new Set();
 
 // =====================================================
@@ -87,9 +83,7 @@ const STAFF_CACHE_LIFETIME = 60 * 1000;
 // =====================================================
 
 function isStaff(member) {
-  if (!member) {
-    return false;
-  }
+  if (!member) return false;
 
   return STAFF_ROLE_IDS.some((roleId) =>
     member.roles.cache.has(roleId)
@@ -106,29 +100,21 @@ function cleanChannelName(name) {
 }
 
 function getTicketOwner(channel) {
-  if (!channel?.topic) {
-    return null;
-  }
+  if (!channel?.topic) return null;
 
   const match =
     channel.topic.match(/owner=(\d+)/);
 
-  return match
-    ? match[1]
-    : null;
+  return match ? match[1] : null;
 }
 
 function getTicketType(channel) {
-  if (!channel?.topic) {
-    return 'unknown';
-  }
+  if (!channel?.topic) return 'unknown';
 
   const match =
     channel.topic.match(/type=([^|]+)/);
 
-  return match
-    ? match[1]
-    : 'unknown';
+  return match ? match[1] : 'unknown';
 }
 
 function ticketPermissions() {
@@ -192,9 +178,6 @@ async function refreshStaffCache(guild) {
     return staffCache;
   }
 
-  // Do NOT repeatedly fetch every server member.
-  // Use the member cache that was loaded at startup.
-
   staffCache =
     guild.members.cache
       .filter(
@@ -206,8 +189,7 @@ async function refreshStaffCache(guild) {
         (member) => member
       );
 
-  staffCacheTime =
-    now;
+  staffCacheTime = now;
 
   return staffCache;
 }
@@ -261,13 +243,28 @@ async function createSupportPanel(guild) {
           '🎫 Crafted SMP Support'
     );
 
-  if (existingPanel) {
-    console.log(
-      '✅ Support panel already exists.'
-    );
+  // ===================================================
+  // DELETE OLD PANEL
+  // ===================================================
 
-    return;
+  if (existingPanel) {
+    try {
+      await existingPanel.delete();
+
+      console.log(
+        '✅ Old support panel removed.'
+      );
+    } catch (error) {
+      console.error(
+        'Could not remove old panel:',
+        error
+      );
+    }
   }
+
+  // ===================================================
+  // NEW PANEL
+  // ===================================================
 
   const embed =
     new EmbedBuilder()
@@ -280,17 +277,11 @@ async function createSupportPanel(guild) {
           '',
           'Choose who you want to handle your ticket.',
           '',
-          '👤 **Specific Staff Member**',
-          'Choose one staff member.',
+          '👤 **Specific Staff**',
+          'Choose one or multiple staff members.',
           '',
           '🛡️ **All Staff**',
           'Allow the entire staff team to see the ticket.',
-          '',
-          '👥 **Specific Staff Groups**',
-          'Choose which staff groups can see the ticket.',
-          '',
-          '👨‍👩‍👧 **Multiple Staff Members**',
-          'Choose multiple specific staff members.',
           '',
           'All tickets are private.',
         ].join('\n')
@@ -329,30 +320,6 @@ async function createSupportPanel(guild) {
           .setEmoji('🛡️')
           .setStyle(
             ButtonStyle.Success
-          ),
-
-        new ButtonBuilder()
-          .setCustomId(
-            'ticket_staff_groups'
-          )
-          .setLabel(
-            'Staff Groups'
-          )
-          .setEmoji('👥')
-          .setStyle(
-            ButtonStyle.Secondary
-          ),
-
-        new ButtonBuilder()
-          .setCustomId(
-            'ticket_multiple_staff'
-          )
-          .setLabel(
-            'Multiple Staff'
-          )
-          .setEmoji('👨‍👩‍👧')
-          .setStyle(
-            ButtonStyle.Secondary
           )
       );
 
@@ -367,12 +334,12 @@ async function createSupportPanel(guild) {
   });
 
   console.log(
-    '✅ Support panel created.'
+    '✅ New support panel created.'
   );
 }
 
 // =====================================================
-// SINGLE STAFF MENU
+// SPECIFIC STAFF MENU
 // =====================================================
 
 async function showSpecificStaffMenu(
@@ -427,94 +394,14 @@ async function showSpecificStaffMenu(
         'ticket_specific_staff_select'
       )
       .setPlaceholder(
-        'Choose a staff member'
+        'Choose one or multiple staff members'
       )
       .setMinValues(1)
-      .setMaxValues(1)
-      .addOptions(
-        options
-      );
-
-  return interaction.editReply({
-    content:
-      '👤 **Choose a staff member:**',
-
-    components: [
-      new ActionRowBuilder()
-        .addComponents(
-          menu
-        ),
-    ],
-  });
-}
-
-// =====================================================
-// MULTIPLE STAFF MENU
-// =====================================================
-
-async function showMultipleStaffMenu(
-  interaction
-) {
-  await interaction.deferReply({
-    ephemeral: true,
-  });
-
-  const staffMembers =
-    await refreshStaffCache(
-      interaction.guild
-    );
-
-  if (
-    staffMembers.length < 2
-  ) {
-    return interaction.editReply({
-      content:
-        '❌ At least 2 staff members are required.',
-    });
-  }
-
-  const visibleStaff =
-    staffMembers.slice(
-      0,
-      25
-    );
-
-  const options =
-    visibleStaff.map(
-      (member) => ({
-        label:
-          member.displayName.substring(
-            0,
-            100
-          ),
-
-        description:
-          getStaffRoleName(
-            member
-          ),
-
-        value:
-          member.id,
-      })
-    );
-
-  const maxChoices =
-    Math.min(
-      10,
-      visibleStaff.length
-    );
-
-  const menu =
-    new StringSelectMenuBuilder()
-      .setCustomId(
-        'ticket_multiple_staff_select'
-      )
-      .setPlaceholder(
-        'Choose multiple staff members'
-      )
-      .setMinValues(2)
       .setMaxValues(
-        maxChoices
+        Math.min(
+          10,
+          visibleStaff.length
+        )
       )
       .addOptions(
         options
@@ -522,7 +409,7 @@ async function showMultipleStaffMenu(
 
   return interaction.editReply({
     content:
-      '👨‍👩‍👧 **Choose multiple staff members:**',
+      '👤 **Choose one or multiple staff members:**',
 
     components: [
       new ActionRowBuilder()
@@ -548,7 +435,7 @@ async function createTicket({
     member.id;
 
   // ===================================================
-  // CREATION LOCK
+  // STOP DOUBLE CREATION
   // ===================================================
 
   if (
@@ -560,7 +447,7 @@ async function createTicket({
       success: false,
 
       message:
-        '⏳ Your ticket is already being created. Please wait a moment.',
+        '⏳ Your ticket is already being created. Please wait.',
     };
   }
 
@@ -571,7 +458,7 @@ async function createTicket({
   try {
 
     // =================================================
-    // CHECK EXISTING TICKET
+    // ONE OPEN TICKET PER PLAYER
     // =================================================
 
     const existingTicket =
@@ -629,7 +516,7 @@ async function createTicket({
     ];
 
     // =================================================
-    // STAFF ROLE ACCESS
+    // STAFF ROLES
     // =================================================
 
     for (
@@ -648,7 +535,9 @@ async function createTicket({
           allow:
             ticketPermissions(),
         });
+
       } else {
+
         overwrites.push({
           id:
             roleId,
@@ -662,7 +551,7 @@ async function createTicket({
     }
 
     // =================================================
-    // SPECIFIC STAFF ACCESS
+    // SELECTED STAFF
     // =================================================
 
     for (
@@ -719,8 +608,15 @@ async function createTicket({
       type ===
       'specific_staff'
     ) {
-      privacyText =
-        'Only you and the staff member you selected can access this ticket.';
+      if (
+        allowedUsers.length === 1
+      ) {
+        privacyText =
+          'Only you and the staff member you selected can access this ticket.';
+      } else {
+        privacyText =
+          'Only you and the staff members you selected can access this ticket.';
+      }
     }
 
     if (
@@ -731,24 +627,8 @@ async function createTicket({
         'You and all Crafted SMP staff can access this ticket.';
     }
 
-    if (
-      type ===
-      'staff_groups'
-    ) {
-      privacyText =
-        'Only you and the selected staff groups can access this ticket.';
-    }
-
-    if (
-      type ===
-      'multiple_staff'
-    ) {
-      privacyText =
-        'Only you and the specific staff members you selected can access this ticket.';
-    }
-
     // =================================================
-    // TICKET MESSAGE
+    // TICKET EMBED
     // =================================================
 
     const embed =
@@ -811,7 +691,8 @@ async function createTicket({
     });
 
     return {
-      success: true,
+      success:
+        true,
 
       channel:
         ticketChannel,
@@ -825,15 +706,14 @@ async function createTicket({
     );
 
     return {
-      success: false,
+      success:
+        false,
 
       message:
         '❌ The ticket could not be created. Please try again.',
     };
 
   } finally {
-
-    // ALWAYS release the lock.
 
     ticketCreationLocks.delete(
       userId
@@ -1044,6 +924,8 @@ async function closeTicket(
     });
   }
 
+  // STAFF ONLY
+
   if (
     !isStaff(
       interaction.member
@@ -1069,6 +951,7 @@ async function closeTicket(
   });
 
   try {
+
     const transcript =
       await createTranscript(
         channel
@@ -1203,10 +1086,13 @@ async function closeTicket(
     setTimeout(
       async () => {
         try {
+
           await channel.delete(
             `Closed by ${interaction.user.tag}`
           );
+
         } catch (error) {
+
           console.error(
             'Delete error:',
             error
@@ -1293,111 +1179,11 @@ client.on(
                 : result.message,
           });
         }
-
-        // STAFF GROUPS
-
-        if (
-          interaction.customId ===
-          'ticket_staff_groups'
-        ) {
-          const menu =
-            new StringSelectMenuBuilder()
-              .setCustomId(
-                'ticket_staff_groups_select'
-              )
-              .setPlaceholder(
-                'Choose staff groups'
-              )
-              .setMinValues(1)
-              .setMaxValues(4)
-              .addOptions(
-
-                {
-                  label:
-                    'General Staff',
-
-                  value:
-                    GENERAL_STAFF_ROLE_ID,
-
-                  emoji:
-                    '🛡️',
-                },
-
-                {
-                  label:
-                    'Senior Staff',
-
-                  value:
-                    SENIOR_STAFF_ROLE_ID,
-
-                  emoji:
-                    '⭐',
-                },
-
-                {
-                  label:
-                    'Co-Owner',
-
-                  value:
-                    CO_OWNER_ROLE_ID,
-
-                  emoji:
-                    '👑',
-                },
-
-                {
-                  label:
-                    'Owner',
-
-                  value:
-                    OWNER_ROLE_ID,
-
-                  emoji:
-                    '👑',
-                }
-              );
-
-          return interaction.reply({
-            content:
-              '👥 Choose which staff groups can access the ticket.',
-
-            components: [
-              new ActionRowBuilder()
-                .addComponents(
-                  menu
-                ),
-            ],
-
-            ephemeral:
-              true,
-          });
-        }
-
-        // MULTIPLE STAFF
-
-        if (
-          interaction.customId ===
-          'ticket_multiple_staff'
-        ) {
-          return showMultipleStaffMenu(
-            interaction
-          );
-        }
-
-        // CLOSE
-
-        if (
-          interaction.customId ===
-          'ticket_close'
-        ) {
-          return closeTicket(
-            interaction
-          );
-        }
       }
 
       // =================================================
       // SPECIFIC STAFF SELECT
+      // ONE OR MULTIPLE STAFF
       // =================================================
 
       if (
@@ -1407,24 +1193,34 @@ client.on(
       ) {
         await interaction.deferUpdate();
 
-        const selectedStaffId =
-          interaction.values[0];
+        const selectedStaffIds =
+          interaction.values;
 
-        const selectedStaff =
-          interaction.guild.members.cache.get(
-            selectedStaffId
+        const validStaffIds =
+          selectedStaffIds.filter(
+            (staffId) => {
+
+              const staffMember =
+                interaction.guild.members.cache.get(
+                  staffId
+                );
+
+              return (
+                staffMember &&
+                !staffMember.user.bot &&
+                isStaff(
+                  staffMember
+                )
+              );
+            }
           );
 
         if (
-          !selectedStaff ||
-          !isStaff(
-            selectedStaff
-          ) ||
-          selectedStaff.user.bot
+          validStaffIds.length === 0
         ) {
           return interaction.editReply({
             content:
-              '❌ That user is no longer a valid staff member.',
+              '❌ No valid staff members were selected.',
 
             components:
               [],
@@ -1442,72 +1238,6 @@ client.on(
             type:
               'specific_staff',
 
-            allowedUsers: [
-              selectedStaffId,
-            ],
-          });
-
-        return interaction.editReply({
-          content:
-            result.success
-              ? `✅ Private ticket created with ${selectedStaff}: ${result.channel}`
-              : result.message,
-
-          components:
-            [],
-        });
-      }
-
-      // =================================================
-      // MULTIPLE STAFF SELECT
-      // =================================================
-
-      if (
-        interaction.isStringSelectMenu() &&
-        interaction.customId ===
-          'ticket_multiple_staff_select'
-      ) {
-        await interaction.deferUpdate();
-
-        const validStaffIds =
-          interaction.values.filter(
-            (staffId) => {
-              const member =
-                interaction.guild.members.cache.get(
-                  staffId
-                );
-
-              return (
-                member &&
-                !member.user.bot &&
-                isStaff(member)
-              );
-            }
-          );
-
-        if (
-          validStaffIds.length < 2
-        ) {
-          return interaction.editReply({
-            content:
-              '❌ You need to choose at least 2 valid staff members.',
-
-            components:
-              [],
-          });
-        }
-
-        const result =
-          await createTicket({
-            guild:
-              interaction.guild,
-
-            member:
-              interaction.member,
-
-            type:
-              'multiple_staff',
-
             allowedUsers:
               validStaffIds,
           });
@@ -1515,44 +1245,7 @@ client.on(
         return interaction.editReply({
           content:
             result.success
-              ? `✅ Private ticket created with ${validStaffIds.length} staff members: ${result.channel}`
-              : result.message,
-
-          components:
-            [],
-        });
-      }
-
-      // =================================================
-      // STAFF GROUP SELECT
-      // =================================================
-
-      if (
-        interaction.isStringSelectMenu() &&
-        interaction.customId ===
-          'ticket_staff_groups_select'
-      ) {
-        await interaction.deferUpdate();
-
-        const result =
-          await createTicket({
-            guild:
-              interaction.guild,
-
-            member:
-              interaction.member,
-
-            type:
-              'staff_groups',
-
-            allowedRoles:
-              interaction.values,
-          });
-
-        return interaction.editReply({
-          content:
-            result.success
-              ? `✅ Private ticket created: ${result.channel}`
+              ? `✅ Private ticket created with ${validStaffIds.length} selected staff member(s): ${result.channel}`
               : result.message,
 
           components:
@@ -1643,6 +1336,7 @@ client.once(
   Events.ClientReady,
 
   async (readyClient) => {
+
     console.log(
       `✅ Logged in as ${readyClient.user.tag}`
     );
@@ -1654,8 +1348,7 @@ client.once(
           GUILD_ID
         );
 
-      // ONE full member fetch at startup.
-      // We do not repeat this every button press.
+      // Only fetch members once at startup.
 
       await guild.members.fetch();
 
@@ -1685,7 +1378,7 @@ client.once(
       );
 
       console.log(
-        '✅ Multi-ticket system ready.'
+        '✅ Support system ready.'
       );
 
     } catch (error) {
@@ -1729,6 +1422,7 @@ process.on(
 // =====================================================
 
 if (!DISCORD_TOKEN) {
+
   console.error(
     '❌ DISCORD_TOKEN is missing.'
   );
